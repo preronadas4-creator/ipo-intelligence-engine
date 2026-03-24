@@ -5,7 +5,6 @@ import numpy as np
 import plotly.express as px
 from transformers import pipeline
 from arch import arch_model
-import snscrape.modules.twitter as sntwitter
 import requests
 from bs4 import BeautifulSoup
 from xgboost import XGBClassifier
