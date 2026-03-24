@@ -26,12 +26,15 @@ model = load_model()
 
 # ---------------- TWITTER SCRAPING ----------------
 def get_tweets(query):
-    tweets = []
-    for i, tweet in enumerate(sntwitter.TwitterSearchScraper(query).get_items()):
-        if i > 50:
-            break
-        tweets.append(tweet.content)
-    return tweets
+    # Temporary fallback (since Twitter scraping breaks on cloud)
+    sample_tweets = [
+        f"{query} IPO looks like a multibagger!",
+        f"Not sure about {query}, seems overhyped",
+        f"{query} IPO subscription is strong",
+        f"Experts are bullish on {query}",
+        f"{query} may give listing gains"
+    ]
+    return sample_tweets
 
 def sentiment_score(texts):
     scores = []
