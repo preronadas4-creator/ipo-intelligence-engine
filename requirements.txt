@@ -3,8 +3,13 @@ yfinance
 pandas
 numpy
 matplotlib
+plotly
 scikit-learn
+xgboost
 transformers
 torch
 arch
-newsapi-python
+snscrape
+beautifulsoup4
+requests
+lxml
