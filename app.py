@@ -149,4 +149,4 @@ if st.button("Analyze IPO"):
     elif prediction > 0.4:
         st.warning("Moderate — risky but possible gains ⚠️")
     else:
-        st.error("Weak IPO — hype-driven or risky ❌")     st.error("Weak IPO — hype-driven or risky ❌")
+        st.error("Weak IPO — hype-driven or risky ❌") 
