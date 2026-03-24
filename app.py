@@ -82,16 +82,32 @@ def get_gmp(ipo):
 
 # ---------------- GARCH ----------------
 def garch_volatility(ticker="^NSEI"):
-    data = yf.download(ticker, period="6mo")
-    returns = 100 * data['Close'].pct_change().dropna()
+    try:
+        data = yf.download(ticker, period="6mo", progress=False)
 
-    model = arch_model(returns, vol='Garch', p=1, q=1)
-    res = model.fit(disp="off")
+        # Check if data exists
+        if data is None or data.empty:
+            return np.array([1.0]*5)
 
-    forecast = res.forecast(horizon=5)
-    vol = np.sqrt(forecast.variance.values[-1])
+        if 'Close' not in data.columns:
+            return np.array([1.0]*5)
 
-    return vol
+        returns = 100 * data['Close'].pct_change().dropna()
+
+        # Check minimum data
+        if len(returns) < 30:
+            return np.array([1.0]*5)
+
+        model = arch_model(returns, vol='Garch', p=1, q=1)
+        res = model.fit(disp="off")
+
+        forecast = res.forecast(horizon=5)
+        vol = np.sqrt(forecast.variance.values[-1])
+
+        return vol
+
+    except Exception as e:
+        return np.array([1.0]*5)
 
 # ---------------- ML MODEL ----------------
 def train_dummy_model():
