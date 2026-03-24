@@ -9,7 +9,6 @@ xgboost
 transformers
 torch
 arch
-snscrape
 beautifulsoup4
 requests
 lxml
