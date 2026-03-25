@@ -2,13 +2,9 @@ streamlit
 yfinance
 pandas
 numpy
-matplotlib
 plotly
 scikit-learn
-xgboost
 transformers
 torch
 arch
-beautifulsoup4
-requests
-lxml
+newsapi-python
