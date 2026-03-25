@@ -2,169 +2,150 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import plotly.express as px
+import plotly.graph_objects as go
 from transformers import pipeline
 from arch import arch_model
-import requests
-from bs4 import BeautifulSoup
-from xgboost import XGBClassifier
+from newsapi import NewsApiClient
 
-st.set_page_config(layout="wide")
+# ---------------- UI CONFIG ----------------
+st.set_page_config(page_title="IPO Intelligence Engine", layout="wide")
 
-st.title("🚀 IPO Intelligence Engine PRO")
-st.markdown("### Bloomberg-style IPO Analysis with AI + Quant")
+# Dark theme
+st.markdown("""
+    <style>
+    body {background-color: #0E1117; color: white;}
+    </style>
+""", unsafe_allow_html=True)
 
-ipo_name = st.text_input("Enter IPO / Company Name", "Tata Technologies")
+st.title("🚀 IPO Intelligence Engine 2.0")
 
-# ---------------- SENTIMENT MODEL ----------------
+# ---------------- SECTOR + STOCK LIST ----------------
+sectors = {
+    "Auto": ["TATAMOTORS.NS", "EICHERMOT.NS"],
+    "IT": ["INFY.NS", "TCS.NS"],
+    "Pharma": ["SUNPHARMA.NS", "DIVISLAB.NS"]
+}
+
+sector = st.selectbox("Select Sector", list(sectors.keys()))
+stock = st.selectbox("Select Stock", sectors[sector])
+
+# ---------------- LIVE DATA ----------------
+@st.cache_data
+def get_data(ticker):
+    data = yf.download(ticker, period="6mo", progress=False)
+    return data
+
+data = get_data(stock)
+
+# ---------------- VOLATILITY ----------------
+def compute_garch(returns):
+    try:
+        model = arch_model(returns, vol='Garch', p=1, q=1)
+        res = model.fit(disp="off")
+        return res.conditional_volatility
+    except:
+        return pd.Series([0]*len(returns))
+
+def compute_egarch(returns):
+    try:
+        model = arch_model(returns, vol='EGarch', p=1, q=1)
+        res = model.fit(disp="off")
+        return res.conditional_volatility
+    except:
+        return pd.Series([0]*len(returns))
+
+returns = data['Close'].pct_change().dropna()
+
+garch_vol = compute_garch(returns)
+egarch_vol = compute_egarch(returns)
+
+# ---------------- VOLATILITY CLUSTERING ----------------
+def volatility_clustering(vol):
+    return "High Clustering" if vol.std() > 0.02 else "Low Clustering"
+
+cluster = volatility_clustering(garch_vol)
+
+# ---------------- SENSITIVITY ANALYSIS ----------------
+def sensitivity_analysis(returns):
+    shocks = [-0.02, -0.01, 0.01, 0.02]
+    results = [returns.mean() + s for s in shocks]
+    return pd.DataFrame({"Shock": shocks, "Impact": results})
+
+sens_df = sensitivity_analysis(returns)
+
+# ---------------- NEWS SENTIMENT ----------------
 @st.cache_resource
 def load_model():
     return pipeline("sentiment-analysis", model="ProsusAI/finbert")
 
 model = load_model()
 
-# ---------------- TWITTER SCRAPING ----------------
-def get_tweets(query):
-    # Temporary fallback (since Twitter scraping breaks on cloud)
-    sample_tweets = [
-        f"{query} IPO looks like a multibagger!",
-        f"Not sure about {query}, seems overhyped",
-        f"{query} IPO subscription is strong",
-        f"Experts are bullish on {query}",
-        f"{query} may give listing gains"
-    ]
-    return sample_tweets
+def get_news(company):
+    try:
+        newsapi = NewsApiClient(api_key="dccb7a07daea449abd667b661ff56126")
+        articles = newsapi.get_everything(q=company, page_size=5)
+        return [a['title'] for a in articles['articles']]
+    except:
+        return []
 
-def sentiment_score(texts):
+def sentiment_score(news):
     scores = []
-    for t in texts:
-        try:
-            res = model(t[:512])[0]
-            if res['label'] == 'positive':
-                scores.append(res['score'])
-            elif res['label'] == 'negative':
-                scores.append(-res['score'])
-            else:
-                scores.append(0)
-        except:
-            scores.append(0)
+    for n in news:
+        res = model(n)[0]
+        if res['label'] == 'positive':
+            scores.append(res['score'])
+        else:
+            scores.append(-res['score'])
     return np.mean(scores) if scores else 0
 
-# ---------------- HYPE DETECTION ----------------
-def hype_index(tweets):
-    keywords = ["multibagger", "rocket", "huge gain", "100%"]
-    count = sum(any(k in t.lower() for k in keywords) for t in tweets)
+news = get_news(stock)
+sentiment = sentiment_score(news)
 
-    if count > 10:
-        return "🔥 Extreme Hype"
-    elif count > 5:
-        return "⚠️ Medium Hype"
-    else:
-        return "✅ Low Hype"
+# ---------------- PREDICTION ----------------
+def predict(sentiment, vol):
+    score = 0
+    if sentiment > 0.2:
+        score += 1
+    if vol.mean() < 0.02:
+        score += 1
+    return score / 2
 
-# ---------------- GMP SCRAPER ----------------
-def get_gmp(ipo):
-    try:
-        url = "https://www.chittorgarh.com/ipo/ipo-grey-market-premium-gmp/331/"
-        r = requests.get(url)
-        soup = BeautifulSoup(r.text, "lxml")
+prob = predict(sentiment, garch_vol)
 
-        table = soup.find("table")
-        rows = table.find_all("tr")
+# ---------------- UI ----------------
+col1, col2, col3 = st.columns(3)
 
-        for row in rows:
-            if ipo.lower() in row.text.lower():
-                return row.text
+col1.metric("Sentiment", round(sentiment,2))
+col2.metric("Volatility", round(garch_vol.mean(),4))
+col3.metric("Listing Gain %", f"{round(prob*100,2)}%")
 
-        return "No GMP data found"
-    except:
-        return "Error fetching GMP"
+# ---------------- CHART ----------------
+fig = go.Figure()
+fig.add_trace(go.Scatter(y=garch_vol, name="GARCH"))
+fig.add_trace(go.Scatter(y=egarch_vol, name="EGARCH"))
 
-# ---------------- GARCH ----------------
-def garch_volatility(ticker="^NSEI"):
-    try:
-        data = yf.download(ticker, period="6mo", progress=False)
+st.plotly_chart(fig)
 
-        # Check if data exists
-        if data is None or data.empty:
-            return np.array([1.0]*5)
+# ---------------- CLUSTER ----------------
+st.subheader("Volatility Clustering")
+st.write(cluster)
 
-        if 'Close' not in data.columns:
-            return np.array([1.0]*5)
+# ---------------- SENSITIVITY ----------------
+st.subheader("Sensitivity Analysis")
+st.dataframe(sens_df)
 
-        returns = 100 * data['Close'].pct_change().dropna()
+# ---------------- NEWS ----------------
+st.subheader("News")
+for n in news:
+    st.write("-", n)
 
-        # Check minimum data
-        if len(returns) < 30:
-            return np.array([1.0]*5)
+# ---------------- LEARN BUTTON ----------------
+if st.button("Learn Concepts"):
+    st.write("GARCH: Measures volatility over time")
+    st.write("EGARCH: Captures asymmetric shocks")
+    st.write("Sentiment: Market mood from news")
 
-        model = arch_model(returns, vol='Garch', p=1, q=1)
-        res = model.fit(disp="off")
-
-        forecast = res.forecast(horizon=5)
-        vol = np.sqrt(forecast.variance.values[-1])
-
-        return vol
-
-    except Exception as e:
-        return np.array([1.0]*5)
-
-# ---------------- ML MODEL ----------------
-def train_dummy_model():
-    X = np.random.rand(200, 4)
-    y = np.random.randint(0, 2, 200)
-
-    model = XGBClassifier()
-    model.fit(X, y)
-    return model
-
-ml_model = train_dummy_model()
-
-def predict(sentiment, hype, vol):
-    hype_val = 1 if "Low" in hype else 0
-
-    X = np.array([[sentiment, hype_val, np.mean(vol), 0.5]])
-    prob = ml_model.predict_proba(X)[0][1]
-
-    return prob
-
-# ---------------- RUN ----------------
-if st.button("Analyze IPO"):
-
-    with st.spinner("Running full analysis..."):
-
-        tweets = get_tweets(ipo_name + " IPO")
-        tw_sent = sentiment_score(tweets)
-        hype = hype_index(tweets)
-
-        gmp = get_gmp(ipo_name)
-        vol = garch_volatility()
-
-        prediction = predict(tw_sent, hype, vol)
-
-    # ---------------- UI ----------------
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("📊 Twitter Sentiment", round(tw_sent, 2))
-    col2.metric("🔥 Hype Index", hype)
-    col3.metric("📉 Volatility", round(np.mean(vol), 2))
-    col4.metric("🎯 Listing Gain %", f"{round(prediction*100,2)}%")
-
-    st.subheader("📈 Volatility Forecast")
-    fig = px.line(vol, title="GARCH Forecast Volatility")
-    st.plotly_chart(fig)
-
-    st.subheader("📑 GMP Data")
-    st.write(gmp)
-
-    st.subheader("🐦 Sample Tweets")
-    for t in tweets[:10]:
-        st.write("-", t)
-
-    st.subheader("🧠 AI Insight")
-    if prediction > 0.7:
-        st.success("Strong IPO — High probability of listing gains 🚀")
-    elif prediction > 0.4:
-        st.warning("Moderate — risky but possible gains ⚠️")
-    else:
-        st.error("Weak IPO — hype-driven or risky ❌") 
+# ---------------- EXPORT ----------------
+if st.button("Export Data"):
+    sens_df.to_csv("analysis.csv")
+    st.success("Downloaded")
